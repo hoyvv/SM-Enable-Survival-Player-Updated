@@ -96,7 +96,7 @@ function TeamsGate:client_onInteract(character, lookAt)
     if not lookAt then return end
 
     if not sm.isHost then
-        self:cl_alert("#Host only.")
+        self:cl_alert("Host only.")
         return
     end
 

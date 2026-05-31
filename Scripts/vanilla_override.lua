@@ -2,6 +2,8 @@ g_survivalDev = false
 
 g_survivalHud = g_survivalHud or sm.gui.createSurvivalHudGui()
 
+dofile "Dispatcher.lua"
+
 dofile("$GAME_DATA/Scripts/game/BasePlayer.lua")
 dofile("$SURVIVAL_DATA/Scripts/game/SurvivalPlayer.lua")
 
@@ -48,7 +50,7 @@ function SurvivalPlayer.sv_n_tryRespawn(self)
 
     if not self.sv.saved.isConscious and not self.sv.respawnDelayTimer and not self.sv.respawnInteractionAttempted then
         self.sv.respawnInteractionAttempted = true
-        self.sv.respawnEndTimer = nil;
+        self.sv.respawnEndTimer = nil
         self.network:sendToClient(self.player, "cl_n_startFadeToBlack",
             { duration = RespawnFadeDuration, timeout = RespawnFadeTimeout })
 
@@ -107,8 +109,13 @@ function SurvivalPlayer.sv_e_onSpawnCharacter(self)
         self.sv.respawnEndTimer:start(RespawnEndDelay)
     end
 
+    if sm.dispatcher then
+        sm.dispatcher:Broadcast("sv_onPlayerSpawn", self.sv.saved.stats, self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn)
+    end
+
     if self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn then
         print("SurvivalPlayer", self.player.id, "spawned")
+
         if self.sv.saved.isNewPlayer then
             self.sv.saved.stats.hp = self.sv.saved.stats.maxhp
             self.sv.saved.stats.food = self.sv.saved.stats.maxfood
@@ -173,7 +180,7 @@ function SurvivalPlayer.server_onFixedUpdate(self, dt)
         self.sv.respawnEndTimer:tick()
         if self.sv.respawnEndTimer:done() then
             self.network:sendToClient(self.player, "cl_n_endFadeToBlack", { duration = RespawnEndFadeDuration })
-            self.sv.respawnEndTimer = nil;
+            self.sv.respawnEndTimer = nil
         end
     end
 
@@ -185,9 +192,10 @@ function SurvivalPlayer.server_onFixedUpdate(self, dt)
         end
     end
 
+    ---@type Character
     local character = self.player:getCharacter()
     -- Update breathing
-    if character then
+    if character then    
         if character:isDiving() and sm.SURVIVAL_EXTENSION.breath then
             self.sv.saved.stats.breath = math.max(self.sv.saved.stats.breath - BreathLostPerTick, 0)
             if self.sv.saved.stats.breath == 0 then
@@ -221,7 +229,9 @@ function SurvivalPlayer.server_onFixedUpdate(self, dt)
         self.sv.statsTimer:tick()
         if self.sv.statsTimer:done() then
             self.sv.statsTimer:start(StatsTickRate)
-
+            if sm.dispatcher then
+                sm.dispatcher:Broadcast("sv_onSecondPassed", self)
+            end
             -- Recover health from food
                 if sm.SURVIVAL_EXTENSION.health_regen then
                 local canRecover = not sm.SURVIVAL_EXTENSION.hunger or self.sv.saved.stats.food > FoodRecoveryThreshold
@@ -285,6 +295,12 @@ function SurvivalPlayer.server_onFixedUpdate(self, dt)
     end
 end
 
+function SurvivalPlayer:sv_e_callDispatcher(args)
+    if sm.dispatcher then
+        sm.dispatcher:Broadcast(args.event, self, args.params)
+    end
+end
+
 function SurvivalPlayer.sv_e_staminaSpend(self, stamina)
     if not sm.SURVIVAL_EXTENSION.godMode then
         if stamina > 0 then
@@ -307,8 +323,7 @@ function SurvivalPlayer.server_onCollision(self, other, collisionPosition, selfP
     if self.sv.saved.stats and self.sv.saved.stats.maxhp then
         maxHp = self.sv.saved.stats.maxhp
     end
-    local damage, tumbleTicks, tumbleVelocity, impactReaction = CharacterCollision(self.player.character, other,
-        collisionPosition, selfPointVelocity, otherPointVelocity, collisionNormal, maxHp / collisionDamageMultiplier, 24)
+    local damage, tumbleTicks, tumbleVelocity, impactReaction = CharacterCollision(self.player.character, other, collisionPosition, selfPointVelocity, otherPointVelocity, collisionNormal, maxHp / collisionDamageMultiplier, 24)
     damage = damage * collisionDamageMultiplier
     if sm.SURVIVAL_EXTENSION.collisionDamage then
         if damage > 0 or tumbleTicks > 0 then
@@ -385,9 +400,25 @@ function SurvivalPlayer.server_onMelee(self, hitPos, attacker, damage, power, hi
     end
 end
 
-function SurvivalPlayer.sv_takeDamage(self, damage, source, attacker)
-    if damage > 0 then
+function SurvivalPlayer.sv_takeDamage(self, damage, source, attacker, isIgnorProtection)
+    if type(damage) == "table" then
+        source = damage.source
+        attacker = damage.attacker
+        damage = damage.damage
+    end
+
+    if damage > 0  then
         damage = damage * GetDifficultySettings().playerTakeDamageMultiplier
+
+        local protection = 0
+        if self.player.publicData and self.player.publicData.armorProtection and isIgnorProtection then
+            protection = self.player.publicData.armorProtection
+        end
+
+        protection = math.min(protection, 1.0)
+
+        damage = damage * (1 - protection)
+
         local character = self.player:getCharacter()
         local lockingInteractable = character:getLockingInteractable()
         if lockingInteractable and lockingInteractable:hasSeat() and sm.SURVIVAL_EXTENSION.unSeatOnDamage then
@@ -398,7 +429,11 @@ function SurvivalPlayer.sv_takeDamage(self, damage, source, attacker)
             if self.sv.saved.isConscious then
                 self.sv.saved.stats.hp = math.max(self.sv.saved.stats.hp - damage, 0)
 
-                print("'SurvivalPlayer' took:", damage, "damage.", self.sv.saved.stats.hp, "/", self.sv.saved.stats.maxhp, "HP")
+                if sm.dispatcher then
+                    sm.dispatcher:Broadcast("sv_onTakeDamage", self, damage, source)
+                end
+
+                print("'SurvivalPlayer' took:", damage, "damage.", self.sv.saved.stats.hp, "/", self.sv.saved.stats.maxhp, "HP", "/", "source:", source)
 
                 if source then
                     self.network:sendToClients("cl_n_onEvent",
@@ -443,6 +478,22 @@ function SurvivalPlayer:sv_syncRules(data)
     self.network:sendToClient(self.player, "cl_syncRules", data)
 end
 
+function SurvivalPlayer:sv_lockControl(state)
+    self.network:sendToClient(self.player, "cl_lockControl", state)
+end
+
+function SurvivalPlayer:sv_lockSprint(state)
+    self.network:sendToClient(self.player, "cl_lockSprint", state)
+end
+
+function SurvivalPlayer:cl_lockControl(state)
+    sm.localPlayer.setLockedControls(state)
+end
+
+function SurvivalPlayer:cl_lockSprint(state)
+    sm.localPlayer.setBlockSprinting(state)
+end
+
 oldClientCreate = oldClientCreate or SurvivalPlayer.client_onCreate
 function newClientCreate(self)
     oldClientCreate(self)
@@ -472,6 +523,8 @@ function newLocalUpdate(self, dt)
         or not g_respawnCooldown then
         return
     end
+
+    
 
     local time = ((g_respawnCooldown + self.cl.deathTick) - sm.game.getServerTick()) / 40
     if time < 0 then return end
@@ -521,9 +574,9 @@ if not worldsHooked then
                 local zSignOffset = math.min(sign(normal.z), 0) * 0.5
                 local offset = sm.vec3.new(0, 0, zSignOffset)
                 local lootHarvestable = sm.harvestable.createHarvestable(
-                sm.uuid.new("97fe0cf2-0591-4e98-9beb-9186f4fd83c8"), hitPos + offset,
-                    sm.vec3.getRotation(sm.vec3.new(0, 1, 0), sm.vec3.new(0, 0, 1)))
-                lootHarvestable:setParams({ uuid = userData.lootUid, quantity = userData.lootQuantity, epic = userData.epic })
+                sm.uuid.new("97fe0cf2-0591-4e98-9beb-9186f4fd83c8"), hitPos + offset, sm.vec3.getRotation(sm.vec3.new(0, 1, 0), sm.vec3.new(0, 0, 1)))
+    
+                lootHarvestable:setParams({ uuid = userData.lootUid, quantity = userData.lootQuantity, epic = userData.epic }) 
             end
         end
         v.server_onProjectile = newProjectile
@@ -531,3 +584,79 @@ if not worldsHooked then
 
     worldsHooked = true
 end
+
+oldInventoryChanges = oldInventoryChanges or SurvivalPlayer.server_onInventoryChanges
+function SurvivalPlayer:server_onInventoryChanges(container, changes)
+	if oldInventoryChanges then
+		oldInventoryChanges(self, container, changes)
+	end
+
+	if container ~= self.player:getInventory() or sm.SURVIVAL_EXTENSION.inventorySize == 30 then
+		return
+	end
+
+	local change = changes and changes[1] or nil
+	local newUuid = (change and change.difference > 0) and change.uuid or nil
+
+	local drops = {}
+	local excess = -sm.SURVIVAL_EXTENSION.inventorySize
+
+	for i = 0, sm.container.getSize(container) - 1 do
+		local item = sm.container.getItem(container, i)
+
+		if item and item.uuid ~= sm.uuid.getNil() then
+			excess = excess + 1
+			local dropOk = false
+
+			pcall(function()
+				dropOk = (sm.item.isBlock(item.uuid) or sm.item.isPart(item.uuid)) or not sm.item.isTool(item.uuid)
+			end)
+			if dropOk then
+				local qty = item.quantity or 1
+
+				if newUuid and item.uuid == newUuid then
+					table.insert(drops, 1, { slot = i, uuid = item.uuid, qty = qty })
+				else
+					table.insert(drops, { slot = i, uuid = item.uuid, qty = qty })
+				end
+			end
+		end
+	end
+
+	if excess > 0 and self.player.character and #drops > 0 then
+		local char = self.player.character
+		local dropsCount = math.min(excess, #drops)
+
+		if sm.container.beginTransaction() then
+			pcall(function()
+				for i = 1, dropsCount do
+					sm.container.spendFromSlot(container, drops[i].slot, drops[i].uuid, drops[i].qty, true)
+				end
+			end)
+			sm.container.endTransaction()
+		end
+
+		local d = char:getDirection()
+		d.z = 0
+		d = d:length() > 0.001 and d:normalize() or sm.vec3.new(1, 0, 0)
+
+		local pos = char.worldPosition + d * 0.7
+		local groundMask = bit.bor(sm.physics.filter.terrainSurface, sm.physics.filter.staticBody)
+		local rayStart = pos + sm.vec3.new(0, 0, 0.5)
+		local rayEnd = pos - sm.vec3.new(0, 0, 100)
+		local hit, res = sm.physics.raycast(rayStart, rayEnd, char, groundMask)
+		local rot = sm.vec3.getRotation(sm.vec3.new(0, 1, 0), sm.vec3.new(0, 0, 1))
+
+		pos = hit and (res.pointWorld + sm.vec3.new(0, 0, 0.2)) or pos
+
+		for i = 1, dropsCount do
+			local bag = sm.harvestable.createHarvestable(sm.uuid.new("97fe0cf2-0591-4e98-9beb-9186f4fd83c8"), pos, rot)
+			if bag then
+				bag:setParams({ uuid = drops[i].uuid, quantity = drops[i].qty })
+			end
+		end
+
+		self.network:sendToClient(self.player, "cl_n_onMessage", { message = "Inventory full!", displayTime = 2 })
+	end
+end
+

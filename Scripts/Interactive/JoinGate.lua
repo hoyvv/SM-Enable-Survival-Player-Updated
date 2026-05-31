@@ -65,10 +65,6 @@ function JoinGate:client_canTinker()
         return false
     end
 
-    if sm.SURVIVAL_EXTENSION.teams[self.selectedTeamData.name] == nil then
-        return false
-    end
-
     local msg = ("to join: %s%s"):format(self.selectedTeamData.colour, self.selectedTeamData.name)
     sm.gui.setInteractionText("Press", sm.gui.getKeyBinding("Tinker", true), msg)
 
@@ -76,7 +72,7 @@ function JoinGate:client_canTinker()
 end
 
 function JoinGate:client_onInteract(character, state)
-    if not state then return end
+    if not sm.isHost or not state then return end
 
     self.gui = sm.gui.createGuiFromLayout(GUI_LAYOUT, false, { backgroundAlpha = 0.5 })
 

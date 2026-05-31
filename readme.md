@@ -64,8 +64,10 @@ The mod offers several chat commands to customize your experience.
 | `/unseatondamage` | Sets whether the player gets unseated upon receiving damage |
 | `/todcycle` | Toggles/sets day cycle speed (adds server load) |
 | `/tod` | Sets the time of day |
+| `/inventorysize` | Sets the inventory size for all players (with limited inventory only)|
 
 ---
+
 
 ## Commands Usable by Everyone
 
@@ -78,3 +80,4 @@ The mod offers several chat commands to customize your experience.
 | `/listplayers` | Lists all players |
 | `/setspawn` | Sets your personal spawn point (takes priority over beds) |
 | `/setteam` | Sets your team |
+| `/tp` | Teleport to player by name (partial names accepted, but must be unique) |
