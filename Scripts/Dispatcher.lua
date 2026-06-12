@@ -1,7 +1,7 @@
-if __loaded then
+if ds_loaded then
 	return
 end
-__loaded = true
+ds_loaded = true
 
 sm.dispatcher = sm.dispatcher or {}
 sm.dispatcher.addons = sm.dispatcher.addons or {}

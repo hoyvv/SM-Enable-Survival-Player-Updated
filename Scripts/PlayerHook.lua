@@ -772,6 +772,16 @@ function PlayerHook:sv_handleSetTeamCommand(args)
 		"sv_saveAndChat",
 		("%s JOINED TEAM '%s%s#ffffff'"):format(name, teamData.colour, team)
 	)
+
+	for _, otherPlayer in pairs(sm.player.getAllPlayers()) do
+		if otherPlayer ~= player then
+			local otherTeam = sm.GetPlayerTeam(otherPlayer)
+			if otherTeam and sm.SURVIVAL_EXTENSION.teams[otherTeam] then
+				local colour = sm.SURVIVAL_EXTENSION.teams[otherTeam].colour
+				sm.event.sendToTool(sm.PLAYERHOOK, "sv_setPlayerTeam", { otherPlayer, otherTeam, colour })
+			end
+		end
+	end
 end
 
 function PlayerHook:sv_handleClearTeamCommand(args)

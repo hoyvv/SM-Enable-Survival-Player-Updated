@@ -92,7 +92,13 @@ function SurvivalPlayer.sv_e_onSpawnCharacter(self)
             -- Attempt to seat the respawned character in a bed
             self.network:sendToClient(self.player, "cl_seatCharacter", { shape = playerBed.shape })
         else
-            local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id]
+            -- local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].spawnPoint or sm.SURVIVAL_EXTENSION.teamSpawnPoints[self.player.id][math.random(1, #sm.SURVIVAL_EXTENSION.teamSpawnPoints[self.player.id])]
+            local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].spawnPoint
+
+            if sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints and #sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints > 0 then
+                spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints[math.random(1, #sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints)]
+            end
+
             if not spawn then
                 local pos = sm.vec3.new(0, 0, 1000)
                 local hit, result = sm.physics.raycast(pos, -pos)
@@ -400,78 +406,74 @@ function SurvivalPlayer.server_onMelee(self, hitPos, attacker, damage, power, hi
     end
 end
 
-function SurvivalPlayer.sv_takeDamage(self, damage, source, attacker, isIgnorProtection)
+function SurvivalPlayer.sv_takeDamage(self, damage, source, attacker, ignorProtection)
     if type(damage) == "table" then
         source = damage.source
         attacker = damage.attacker
+        ignorProtection = damage.IgnorProtection
         damage = damage.damage
     end
 
-    if damage > 0  then
-        damage = damage * GetDifficultySettings().playerTakeDamageMultiplier
-
-        local protection = 0
-        if self.player.publicData and self.player.publicData.armorProtection and isIgnorProtection then
-            protection = self.player.publicData.armorProtection
-        end
-
-        protection = math.min(protection, 1.0)
-
-        damage = damage * (1 - protection)
-
-        local character = self.player:getCharacter()
-        local lockingInteractable = character:getLockingInteractable()
-        if lockingInteractable and lockingInteractable:hasSeat() and sm.SURVIVAL_EXTENSION.unSeatOnDamage then
-            lockingInteractable:setSeatCharacter(character)
-        end
-
-        if not sm.SURVIVAL_EXTENSION.godMode and self.sv.damageCooldown:done() then
-            if self.sv.saved.isConscious then
-                self.sv.saved.stats.hp = math.max(self.sv.saved.stats.hp - damage, 0)
-
-                if sm.dispatcher then
-                    sm.dispatcher:Broadcast("sv_onTakeDamage", self, damage, source)
-                end
-
-                print("'SurvivalPlayer' took:", damage, "damage.", self.sv.saved.stats.hp, "/", self.sv.saved.stats.maxhp, "HP", "/", "source:", source)
-
-                if source then
-                    self.network:sendToClients("cl_n_onEvent",
-                        { event = source, pos = character:getWorldPosition(), damage = damage * 0.01 })
-                else
-                    self.player:sendCharacterEvent("hit")
-                end
-
-                if self.sv.saved.stats.hp <= 0 then
-                    print("'SurvivalPlayer' knocked out!")
-                    self.sv.respawnInteractionAttempted = false
-                    self.sv.saved.isConscious = false
-                    character:setTumbling(true)
-                    character:setDowned(true)
-
-                    local attackerType = type(attacker)
-
-                    if attackerType == "Player" then
-                        sm.event.sendToTool(sm.PLAYERHOOK, "sv_OnPlayerDeathByPlayer",
-                            { attacker = attacker, victim = self.player })
-                    elseif attackerType == "Unit" then
-                        sm.event.sendToTool(sm.PLAYERHOOK, "sv_OnPlayerDeathByUnit",
-                            { attacker = attacker, victim = self.player })
-                    else
-                        sm.event.sendToTool(sm.PLAYERHOOK, "sv_onUnknownPlayerDeath",
-                            { attacker = attacker, victim = self.player})
-                    end
-
-                    self.sv.saved.deathTick = sm.game.getServerTick()
-                end
-
-                self.storage:save(self.sv.saved)
-                self.network:setClientData(self.sv.saved)
-            end
-        else
-            print("'SurvivalPlayer' resisted", damage, "damage")
-        end
+    if not damage or damage <= 0 then
+        return
     end
+
+    if sm.SURVIVAL_EXTENSION.godMode or not self.sv.damageCooldown:done() or not self.sv.saved.isConscious then
+        print("'SurvivalPlayer' resisted", damage, "damage")
+        return
+    end
+
+    damage = damage * GetDifficultySettings().playerTakeDamageMultiplier
+
+    local protection = 0
+    if ignorProtection and self.player.publicData and self.player.publicData.armorProtection then
+        protection = math.min(self.player.publicData.armorProtection, 1.0)
+    end
+
+    damage = damage * (1 - protection)
+
+    local character = self.player:getCharacter()
+    local lockingInteractable = character:getLockingInteractable()
+    if lockingInteractable and lockingInteractable:hasSeat() and sm.SURVIVAL_EXTENSION.unSeatOnDamage then
+        lockingInteractable:setSeatCharacter(character)
+    end
+
+    self.sv.saved.stats.hp = math.max(self.sv.saved.stats.hp - damage, 0)
+
+    if sm.dispatcher then
+        sm.dispatcher:Broadcast("sv_onTakeDamage", self, damage, source)
+    end
+
+    print(string.format("'SurvivalPlayer' took: %.1f damage. %d/%d HP. Source: %s", damage, self.sv.saved.stats.hp, self.sv.saved.stats.maxhp, tostring(source)))
+
+    if source then
+        self.network:sendToClients("cl_n_onEvent", { event = source, pos = character:getWorldPosition(), damage = damage * 0.01 })
+    else
+        self.player:sendCharacterEvent("hit")
+    end
+
+    if self.sv.saved.stats.hp <= 0 then
+        print("'SurvivalPlayer' knocked out!")
+        self.sv.respawnInteractionAttempted = false
+        self.sv.saved.isConscious = false
+        character:setTumbling(true)
+        character:setDowned(true)
+
+        local attackerType = type(attacker)
+        local deathEvent = "sv_onUnknownPlayerDeath"
+
+        if attackerType == "Player" then
+            deathEvent = "sv_OnPlayerDeathByPlayer"
+        elseif attackerType == "Unit" then
+            deathEvent = "sv_OnPlayerDeathByUnit"
+        end
+
+        sm.event.sendToTool(sm.PLAYERHOOK, deathEvent, { attacker = attacker, victim = self.player })
+        self.sv.saved.deathTick = sm.game.getServerTick()
+    end
+
+    self.storage:save(self.sv.saved)
+    self.network:setClientData(self.sv.saved)
 end
 
 function SurvivalPlayer:sv_syncRules(data)

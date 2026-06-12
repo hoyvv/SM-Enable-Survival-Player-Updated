@@ -68,7 +68,6 @@ The mod offers several chat commands to customize your experience.
 
 ---
 
-
 ## Commands Usable by Everyone
 
 | Command | Description |
