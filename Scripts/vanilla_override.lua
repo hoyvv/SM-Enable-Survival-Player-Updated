@@ -81,79 +81,77 @@ function SurvivalPlayer.sv_e_respawn(self)
 end
 
 function SurvivalPlayer.sv_e_onSpawnCharacter(self)
-    if self.sv.saved.isNewPlayer then
-        -- Intro cutscene for new player
-        if not g_survivalDev then
-            --self:sv_e_startLocalCutscene( "camera_approach_crash" )
-        end
-    elseif self.sv.spawnparams.respawn then
-        local playerBed = sm.RESPAWNMANAGER:sv_getPlayerBed(self.player)
-        if playerBed and playerBed.shape and sm.exists(playerBed.shape) and playerBed.shape.body:getWorld() == self.player.character:getWorld() then
-            -- Attempt to seat the respawned character in a bed
-            self.network:sendToClient(self.player, "cl_seatCharacter", { shape = playerBed.shape })
-        else
-            -- local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].spawnPoint or sm.SURVIVAL_EXTENSION.teamSpawnPoints[self.player.id][math.random(1, #sm.SURVIVAL_EXTENSION.teamSpawnPoints[self.player.id])]
-            local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].spawnPoint
+	if self.sv.saved.isNewPlayer then
+		-- Intro cutscene for new player
+		if not g_survivalDev then
+			--self:sv_e_startLocalCutscene( "camera_approach_crash" )
+		end
+	elseif self.sv.spawnparams.respawn then
+		local playerBed = sm.RESPAWNMANAGER:sv_getPlayerBed(self.player)
+		local hasValidBed = playerBed and playerBed.shape and sm.exists(playerBed.shape) and playerBed.shape.body
 
-            if sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints and #sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints > 0 then
-                spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints[math.random(1, #sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id].teamSpawnPoints)]
-            end
+		if hasValidBed and playerBed.shape.body:getWorld() == self.player.character:getWorld() then
+			self.network:sendToClient(self.player, "cl_seatCharacter", { shape = playerBed.shape })
+		else
+			local spawn = sm.SURVIVAL_EXTENSION.playerSpawns[self.player.id] or nil
 
-            if not spawn then
-                local pos = sm.vec3.new(0, 0, 1000)
-                local hit, result = sm.physics.raycast(pos, -pos)
-                spawn = result.pointWorld + sm.vec3.new(0, 0, 1)
-            end
+			if not spawn then
+				local pos = sm.vec3.new(0, 0, 1000)
+				local hit, result = sm.physics.raycast(pos, -pos)
+				spawn = (hit and result.pointWorld or sm.vec3.new(0, 0, 0)) + sm.vec3.new(0, 0, 1)
+			end
 
-            self.player:setCharacter(sm.character.createCharacter(self.player, sm.world.getCurrentWorld(), spawn))
+			-- Respawned without a bed
+			--self:sv_e_startLocalCutscene( "camera_wakeup_ground" )
+		end
 
-            -- Respawned without a bed
-            --self:sv_e_startLocalCutscene( "camera_wakeup_ground" )
-        end
+		self.sv.respawnEndTimer = Timer()
+		self.sv.respawnEndTimer:start(RespawnEndDelay)
+	end
 
-        self.sv.respawnEndTimer = Timer()
-        self.sv.respawnEndTimer:start(RespawnEndDelay)
-    end
+	if sm.dispatcher then
+		sm.dispatcher:Broadcast(
+			"sv_onPlayerSpawn",
+			self.sv.saved.stats,
+			self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn
+		)
+	end
 
-    if sm.dispatcher then
-        sm.dispatcher:Broadcast("sv_onPlayerSpawn", self.sv.saved.stats, self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn)
-    end
+	if self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn then
+		print("SurvivalPlayer", self.player.id, "spawned")
 
-    if self.sv.saved.isNewPlayer or self.sv.spawnparams.respawn then
-        print("SurvivalPlayer", self.player.id, "spawned")
+		if self.sv.saved.isNewPlayer then
+			self.sv.saved.stats.hp = self.sv.saved.stats.maxhp
+			self.sv.saved.stats.food = self.sv.saved.stats.maxfood
+			self.sv.saved.stats.water = self.sv.saved.stats.maxwater
+		else
+			self.sv.saved.stats.hp = sm.SURVIVAL_EXTENSION.spawn_hp
+			self.sv.saved.stats.food = sm.SURVIVAL_EXTENSION.spawn_food
+			self.sv.saved.stats.water = sm.SURVIVAL_EXTENSION.spawn_water
+		end
+		self.sv.saved.isConscious = true
+		self.sv.saved.hasRevivalItem = false
+		self.sv.saved.isNewPlayer = false
+		self.storage:save(self.sv.saved)
+		self.network:setClientData(self.sv.saved)
 
-        if self.sv.saved.isNewPlayer then
-            self.sv.saved.stats.hp = self.sv.saved.stats.maxhp
-            self.sv.saved.stats.food = self.sv.saved.stats.maxfood
-            self.sv.saved.stats.water = self.sv.saved.stats.maxwater
-        else
-            self.sv.saved.stats.hp = sm.SURVIVAL_EXTENSION.spawn_hp --30
-            self.sv.saved.stats.food = sm.SURVIVAL_EXTENSION.spawn_food --30
-            self.sv.saved.stats.water = sm.SURVIVAL_EXTENSION.spawn_water --30
-        end
-        self.sv.saved.isConscious = true
-        self.sv.saved.hasRevivalItem = false
-        self.sv.saved.isNewPlayer = false
-        self.storage:save(self.sv.saved)
-        self.network:setClientData(self.sv.saved)
+		self.player.character:setTumbling(false)
+		self.player.character:setDowned(false)
+		self.sv.damageCooldown:start(40)
+	else
+		-- SurvivalPlayer rejoined the game
+		if self.sv.saved.stats.hp <= 0 or not self.sv.saved.isConscious then
+			self.player.character:setTumbling(true)
+			self.player.character:setDowned(true)
+		end
+	end
 
-        self.player.character:setTumbling(false)
-        self.player.character:setDowned(false)
-        self.sv.damageCooldown:start(40)
-    else
-        -- SurvivalPlayer rejoined the game
-        if self.sv.saved.stats.hp <= 0 or not self.sv.saved.isConscious then
-            self.player.character:setTumbling(true)
-            self.player.character:setDowned(true)
-        end
-    end
+	self.sv.respawnInteractionAttempted = false
+	self.sv.respawnDelayTimer = nil
+	self.sv.respawnTimeoutTimer = nil
+	self.sv.spawnparams = {}
 
-    self.sv.respawnInteractionAttempted = false
-    self.sv.respawnDelayTimer = nil
-    self.sv.respawnTimeoutTimer = nil
-    self.sv.spawnparams = {}
-
-    sm.event.sendToGame("sv_e_onSpawnPlayerCharacter", self.player)
+	sm.event.sendToGame("sv_e_onSpawnPlayerCharacter", self.player)
 end
 
 function SurvivalPlayer.server_onFixedUpdate(self, dt)
@@ -525,8 +523,6 @@ function newLocalUpdate(self, dt)
         or not g_respawnCooldown then
         return
     end
-
-    
 
     local time = ((g_respawnCooldown + self.cl.deathTick) - sm.game.getServerTick()) / 40
     if time < 0 then return end

@@ -104,7 +104,7 @@ function PlayerHook:server_onCreate()
 			todCycle = false,
 			todCycleLen = 24, -- minutes
 			lastTod = 0.5,
-			inventorySize = 10,
+			inventorySize = 30,
 		}
 
 	if not sm.SURVIVAL_EXTENSION.respawnCooldown then
@@ -116,7 +116,7 @@ function PlayerHook:server_onCreate()
 	end
 
 	if not sm.SURVIVAL_EXTENSION.inventorySize then
-		sm.SURVIVAL_EXTENSION.inventorySize = 20
+		sm.SURVIVAL_EXTENSION.inventorySize = 30
 	end
 
 	self:sv_saveSettings()
@@ -130,25 +130,6 @@ function PlayerHook:server_onCreate()
 
 	sm.PLAYERHOOK = self.tool
 end
-
--- function PlayerHook:server_onFixedUpdate(dt)
--- 	if not sm.SURVIVAL_EXTENSION.todCycle or not sm.isHost then
--- 		return
--- 	end
-
--- 	self.saveTimer = (self.saveTimer or 0) + 1
--- 	if self.saveTimer >= 1000 then
--- 		self:sv_saveSettings()
--- 		self.saveTimer = 0
--- 	end
-
--- 	sm.SURVIVAL_EXTENSION.lastTod = sm.game.getTimeOfDay()
-
--- 	local dayLengthSeconds = sm.SURVIVAL_EXTENSION.todCycleLen * 60
--- 	sm.SURVIVAL_EXTENSION.lastTod = (sm.SURVIVAL_EXTENSION.lastTod + (dt / dayLengthSeconds)) % 1.0
-
--- 	self.network:sendToClients("cl_setWorldTime", sm.SURVIVAL_EXTENSION.lastTod)
--- end
 
 function PlayerHook:sv_saveSettings()
 	self.storage:save(sm.SURVIVAL_EXTENSION)
@@ -369,6 +350,7 @@ local nameDisplayModes = {
 	"TEAM",
 	"NONE",
 }
+
 local overrideNameDisplayModes = {
 	"ALL",
 	"TEAM",
@@ -435,8 +417,6 @@ end
 function PlayerHook:cl_forceUpdateNameTag(mode)
 	self.nameDisplayModeOverride = mode
 	g_cl_nameDisplayModeOverrideActive = mode ~= 4
-
-	-- self:cl_chatMessage("#ff0000ENFORCED#ffffff NAME DISPLAY MODE: #df7f00" .. nameDisplayModes[mode])
 end
 
 function PlayerHook:sv_forceUpdateAllNameTags(mode)
@@ -464,7 +444,6 @@ function PlayerHook:cl_onConfirmButtonClick(name)
 end
 
 function PlayerHook:cl_setPlayerTeam(args)
-	---@type Player
 	local player, team, teamColour = args[1], args[2], args[3]
 
 	player.clientPublicData = player.clientPublicData or {}
@@ -1004,8 +983,7 @@ function PlayerHook:sv_handleRenameTeamCommand(args)
 			sm.event.sendToTool(sm.PLAYERHOOK, "sv_setPlayerTeam", { player, newTeamName, teamData.colour })
 
 			player.publicData.survivalExtensionTeam = newTeamName
-			sm.SURVIVAL_EXTENSION.playerSpawns[player.id] = teamData.spawnPoint
-				or sm.SURVIVAL_EXTENSION.playerSpawns[player.id]
+			sm.SURVIVAL_EXTENSION.playerSpawns[player.id] = teamData.spawnPoint or sm.SURVIVAL_EXTENSION.playerSpawns[player.id]
 		end
 	end
 
