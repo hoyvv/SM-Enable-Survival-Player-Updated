@@ -101,6 +101,8 @@ function SurvivalPlayer.sv_e_onSpawnCharacter(self)
 				spawn = (hit and result.pointWorld or sm.vec3.new(0, 0, 0)) + sm.vec3.new(0, 0, 1)
 			end
 
+            self.player:setCharacter(sm.character.createCharacter(self.player, sm.world.getCurrentWorld(), spawn))
+
 			-- Respawned without a bed
 			--self:sv_e_startLocalCutscene( "camera_wakeup_ground" )
 		end
